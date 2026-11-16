@@ -1,0 +1,35 @@
+name: Supabase health check
+
+on:
+  schedule:
+    # Approximately every three calendar days at 09:15 Guatemala time.
+    # This is a health signal, not a guarantee that a Free project will not pause.
+    - cron: "15 15 */3 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  database-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check the LeadOps database
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          node --input-type=module <<'NODE'
+          const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
+          const key = process.env.SUPABASE_PUBLISHABLE_KEY;
+          if (!url || !key) throw new Error("Repository secrets are not configured");
+          const response = await fetch(`${url}/rest/v1/rpc/keepalive_ping`, {
+            method: "POST",
+            headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+            body: "{}",
+          });
+          if (!response.ok) throw new Error(`Supabase returned ${response.status}: ${await response.text()}`);
+          console.log("LeadOps database health check passed", await response.json());
+          NODE
+

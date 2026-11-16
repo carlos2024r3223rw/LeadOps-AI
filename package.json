@@ -1,0 +1,23 @@
+{
+  "name": "leadops-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Human-in-the-loop lead operations platform for AI-assisted agencies.",
+  "workspaces": ["web", "api"],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w api\" \"npm run dev -w web\"",
+    "build": "npm run build -w api && npm run build -w web",
+    "typecheck": "npm run typecheck -w api && npm run typecheck -w web",
+    "test": "npm run test -w api",
+    "health:supabase": "node scripts/supabase-healthcheck.mjs",
+    "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "9.2.5",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
+

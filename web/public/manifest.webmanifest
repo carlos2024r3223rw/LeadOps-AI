@@ -1,0 +1,13 @@
+{
+  "name": "LeadOps AI",
+  "short_name": "LeadOps",
+  "description": "AI-assisted lead operations with human approval.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3f5f0",
+  "theme_color": "#0d2e29",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
+
