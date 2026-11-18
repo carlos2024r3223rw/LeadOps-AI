@@ -23,20 +23,20 @@ The result of `git check-ignore .env` must identify `.gitignore`. Never add `.en
 Create a Vercel project with **Root Directory** set to `api` and configure:
 
 - `DEMO_MODE=false`
-- `WEB_ORIGIN=https://<web-project>.vercel.app`
+- `WEB_ORIGIN=https://lead-ops-ai.vercel.app,https://leadops.webcarlos.dev`
 - `SUPABASE_URL`
 - `SUPABASE_PUBLISHABLE_KEY`
 - `SUPABASE_SECRET_KEY`
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL=gemini-3.1-flash-lite`
 
-Do not create any `VITE_*` copy of a server secret. Vercel detects `api/src/server.ts` as the Fastify entrypoint.
+Do not create any `VITE_*` copy of a server secret. The Vercel project uses `api/index.ts` as its single Fastify serverless entrypoint.
 
 ## 3. Web project
 
 Create another Vercel project with **Root Directory** set to `web` and configure:
 
-- `VITE_API_URL=https://<api-project>.vercel.app`
+- `VITE_API_URL=https://lead-ops-ai-api.vercel.app`
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
 - `VITE_DEMO_MODE=true`
@@ -55,7 +55,7 @@ The administrator must have `app_metadata.role` set to `portfolio_admin` or `lea
 
 ## 5. CORS and public verification
 
-Set the API `WEB_ORIGIN` to the exact web origin. It accepts a comma-separated list when local and production origins are both needed.
+Set the API `WEB_ORIGIN` to the exact web origins. It accepts a comma-separated list when the project is served from both the Vercel domain and the custom portfolio domain.
 
 Verify from the public URL:
 
