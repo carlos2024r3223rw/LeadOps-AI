@@ -29,9 +29,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init?.headers,
     },
   });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error ?? "No se pudo completar la solicitud");
-  return payload;
+
+  const raw = await response.text();
+  let payload: { error?: string };
+  try {
+    payload = raw ? JSON.parse(raw) as { error?: string } : {};
+  } catch {
+    throw new Error(`La API devolvió una respuesta inválida (HTTP ${response.status}).`);
+  }
+  if (!response.ok) throw new Error(payload.error ?? `No se pudo completar la solicitud (HTTP ${response.status}).`);
+  return payload as T;
 }
 
 export const api = {
@@ -46,4 +53,3 @@ export const api = {
   approveLead: (id: string) => request<{ data: Lead; duplicate: boolean }>(`/v1/leads/${id}/approve`, { method: "POST" }),
   discardLead: (id: string) => request<{ data: Lead }>(`/v1/leads/${id}/discard`, { method: "POST" }),
 };
-
