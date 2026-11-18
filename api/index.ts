@@ -23,18 +23,8 @@ export default async function handler(request: any, response: any) {
 
     appPromise ??= buildApp();
     const app = await appPromise;
-    const result = await app.inject({
-      method: request.method ?? "GET",
-      url: request.url ?? "/",
-      headers: request.headers,
-      payload: request.body,
-    });
-
-    response.statusCode = result.statusCode;
-    for (const [key, value] of Object.entries(result.headers)) {
-      if (value !== undefined) response.setHeader(key, String(value));
-    }
-    response.end(result.rawPayload);
+    await app.ready();
+    app.server.emit("request", request, response);
   } catch (error) {
     console.error("Vercel handler failure", error);
     response.statusCode = 500;
