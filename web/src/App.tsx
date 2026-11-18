@@ -335,7 +335,7 @@ function AppContent() {
 }
 
 export default function App() {
-  const [language, setLanguageState] = useState<Language>(() => localStorage.getItem("leadops_language") === "en" ? "en" : "es");
+  const [language, setLanguageState] = useState<Language>(() => localStorage.getItem("leadops_language") === "es" ? "es" : "en");
   function setLanguage(next: Language) {
     localStorage.setItem("leadops_language", next);
     document.documentElement.lang = next;
