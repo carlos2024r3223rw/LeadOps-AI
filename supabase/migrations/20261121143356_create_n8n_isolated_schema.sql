@@ -27,24 +27,8 @@ begin
 end
 $$;
 
-alter role leadops_n8n
-  nosuperuser
-  nocreatedb
-  nocreaterole
-  noreplication
-  nobypassrls;
-
 grant connect on database postgres to leadops_n8n;
 
-create schema if not exists n8n authorization leadops_n8n;
-alter schema n8n owner to leadops_n8n;
+create schema if not exists n8n;
 revoke all on schema n8n from public;
 grant usage, create on schema n8n to leadops_n8n;
-
-alter role leadops_n8n set search_path = n8n;
-
-alter default privileges for role leadops_n8n in schema n8n
-  revoke all on tables from public;
-
-alter default privileges for role leadops_n8n in schema n8n
-  revoke all on sequences from public;
