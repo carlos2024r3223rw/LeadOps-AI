@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Activity, Assessment, Draft, Execution, Lead, LeadInput } from "./types.js";
-import type { LeadStore } from "./store-contract.js";
+import type { DeliveryActor, LeadStore } from "./store-contract.js";
 import { analyzeLeadWithGemini, geminiIsConfigured } from "./ai/gemini.js";
 
 const iso = (offsetMinutes = 0) => new Date(Date.now() + offsetMinutes * 60_000).toISOString();
@@ -239,7 +239,7 @@ export class DemoStore implements LeadStore {
     return lead;
   }
 
-  approveAndSend(id: string): { lead?: Lead; duplicate: boolean } {
+  approveAndSend(id: string, _actor?: DeliveryActor): { lead?: Lead; duplicate: boolean } {
     const lead = this.leads.get(id);
     if (!lead?.draft) return { duplicate: false };
     const key = `send:${lead.id}:draft:${lead.draft.version}`;

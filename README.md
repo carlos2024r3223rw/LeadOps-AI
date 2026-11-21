@@ -74,7 +74,7 @@ The workflow runs approximately every three calendar days at 09:15 Guatemala tim
 
 Copy `.env.example` to `.env` when connecting services. Never expose the Supabase secret key, Gmail refresh token, n8n secret, or AI key through `VITE_*` variables. The Supabase secret key belongs only in the API environment and bypasses RLS; it must never be shipped to the browser or committed to Git. In production, the browser talks only to Fastify; Fastify validates the user session and performs privileged operations server-side.
 
-The current API intentionally refuses real email delivery. Supabase persistence, structured Gemini analysis, protected administrator routes, and isolated demo sessions are implemented; n8n orchestration and Gmail OAuth are the next integration blocks documented in `docs/architecture.md`.
+The API supports controlled Gmail delivery through server-side OAuth. Real delivery remains opt-in (`GMAIL_DELIVERY_MODE=real`), requires an authenticated administrator, and can only run after an immutable approval and idempotent outbox record exist. Demo sessions always simulate email. See `docs/gmail-oauth.md` for activation.
 
 The portfolio demo stores only fictitious, expiring session state in `demo_sessions`. This keeps the demo reliable when the API runs across multiple serverless instances while preserving separation from real leads.
 

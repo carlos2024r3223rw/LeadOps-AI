@@ -29,6 +29,12 @@ Create a Vercel project with **Root Directory** set to `api` and configure:
 - `SUPABASE_SECRET_KEY`
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL=gemini-3.1-flash-lite`
+- `GMAIL_DELIVERY_MODE=simulated` until OAuth is ready; change deliberately to `real`
+- `GMAIL_CLIENT_ID`
+- `GMAIL_CLIENT_SECRET`
+- `GMAIL_REDIRECT_URI=https://lead-ops-ai-api.vercel.app/v1/integrations/gmail/callback`
+- `GMAIL_OAUTH_SUCCESS_URL=https://leadops.webcarlos.dev`
+- `GMAIL_TOKEN_ENCRYPTION_KEY` (32 random bytes encoded as base64)
 
 Do not create any `VITE_*` copy of a server secret. The Vercel project uses `api/index.ts` as its single Fastify serverless entrypoint.
 
@@ -65,6 +71,9 @@ Verify from the public URL:
 4. Administrator email/password login.
 5. Unauthorized private API request returns `401`.
 6. Duplicate submission and duplicate approval do not create duplicate effects.
+7. In the private workspace, connect Gmail from **Settings**, approve one test lead addressed to an inbox you control, and verify the Gmail provider ID in the activity history.
+
+Detailed Google Cloud and OAuth setup is in [`gmail-oauth.md`](gmail-oauth.md).
 
 ## 6. Optional Supabase health signal
 

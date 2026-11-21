@@ -160,6 +160,24 @@ create table public.demo_sessions (
   updated_at timestamptz not null default now()
 );
 
+-- Server-only Gmail OAuth credentials. Tokens are encrypted by the API with
+-- AES-256-GCM before they reach Postgres and are never readable by web clients.
+create table public.gmail_integrations (
+  id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null unique references auth.users(id) on delete cascade,
+  account_email text,
+  encrypted_access_token text,
+  encrypted_refresh_token text,
+  access_token_expires_at timestamptz,
+  scopes text[] not null default '{}',
+  pending_state_hash text unique,
+  pending_state_expires_at timestamptz,
+  connected_at timestamptz,
+  revoked_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index leads_status_created_idx on public.leads (status, created_at desc);
 create index leads_email_idx on public.leads (normalized_email, created_at desc);
 create index executions_lead_created_idx on public.workflow_executions (lead_id, created_at desc);
@@ -180,6 +198,7 @@ create index response_drafts_edited_by_idx on public.response_drafts (edited_by)
 create index response_drafts_previous_idx on public.response_drafts (previous_draft_id);
 create index workflow_executions_root_idx on public.workflow_executions (root_execution_id);
 create index demo_sessions_expires_idx on public.demo_sessions (expires_at);
+create index gmail_integrations_owner_idx on public.gmail_integrations (owner_user_id);
 
 create function private.set_updated_at()
 returns trigger
@@ -197,6 +216,8 @@ for each row execute function private.set_updated_at();
 create trigger outbound_messages_set_updated_at before update on public.outbound_messages
 for each row execute function private.set_updated_at();
 create trigger demo_sessions_set_updated_at before update on public.demo_sessions
+for each row execute function private.set_updated_at();
+create trigger gmail_integrations_set_updated_at before update on public.gmail_integrations
 for each row execute function private.set_updated_at();
 
 -- Read-only health check used by the external scheduled monitor. It performs a
@@ -224,10 +245,13 @@ alter table public.approvals enable row level security;
 alter table public.outbound_messages enable row level security;
 alter table public.activity_events enable row level security;
 alter table public.demo_sessions enable row level security;
+alter table public.gmail_integrations enable row level security;
 
 revoke all on table public.leads, public.lead_requests, public.workflow_executions,
   public.lead_assessments, public.response_drafts, public.approvals,
   public.outbound_messages, public.activity_events, public.demo_sessions from anon, authenticated;
+revoke all on table public.gmail_integrations from anon, authenticated, public;
+grant all on table public.gmail_integrations to service_role;
 
 -- Signed-in dashboard users may read operational data only when the trusted
 -- app_metadata role is assigned. All writes still go through Fastify/service_role.
@@ -241,6 +265,11 @@ using (false)
 with check (false);
 
 create policy "clients cannot access demo sessions" on public.demo_sessions
+for all to anon, authenticated
+using (false)
+with check (false);
+
+create policy "clients cannot access Gmail credentials" on public.gmail_integrations
 for all to anon, authenticated
 using (false)
 with check (false);
@@ -265,4 +294,5 @@ comment on table public.approvals is 'Immutable human decisions tied to an exact
 comment on table public.outbound_messages is 'Email outbox and database-level duplicate-send barrier.';
 comment on function public.keepalive_ping() is 'Minimal read-only database health check for external uptime monitoring.';
 comment on table public.demo_sessions is 'Expiring, fictitious demo state used by the server-side portfolio sandbox.';
+comment on table public.gmail_integrations is 'Server-only encrypted Gmail OAuth credentials and short-lived authorization state.';
 

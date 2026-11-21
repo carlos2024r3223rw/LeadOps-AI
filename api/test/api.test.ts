@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildApp } from "../src/app.js";
 import { DemoStore } from "../src/store.js";
+import { createRawMessage } from "../src/gmail.js";
 
 const validLead = {
   name: "Carlos Méndez",
@@ -86,5 +87,29 @@ test("demo sessions are isolated", async () => {
   assert.equal(firstList.json().data.some((lead: { id: string }) => lead.id === created.json().data.id), true);
   assert.equal(secondList.json().data.some((lead: { id: string }) => lead.id === created.json().data.id), false);
   await app.close();
+});
+
+test("demo sessions report simulated Gmail without exposing a connect flow", async () => {
+  const app = await buildApp(new DemoStore(), undefined);
+  const headers = await createDemoAccess(app);
+  const status = await app.inject({ method: "GET", url: "/v1/integrations/gmail/status", headers });
+  assert.equal(status.statusCode, 200);
+  assert.deepEqual(status.json().data, { mode: "simulated", configured: false, connected: false });
+  await app.close();
+});
+
+test("Gmail messages use deterministic Message-ID and base64url MIME", () => {
+  const raw = createRawMessage({
+    ownerUserId: "admin",
+    to: "client@example.com",
+    subject: "Propuesta para migración",
+    body: "Hola,\n\nGracias por escribirnos.",
+    messageId: "leadops-test@example.local",
+  }, "sender@example.com");
+  const mime = Buffer.from(raw, "base64url").toString("utf8");
+  assert.match(mime, /Message-ID: <leadops-test@example\.local>/);
+  assert.match(mime, /To: client@example\.com/);
+  assert.match(mime, /Subject: =\?UTF-8\?B\?/);
+  assert.match(mime, /Content-Transfer-Encoding: base64/);
 });
 

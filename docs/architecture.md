@@ -40,11 +40,11 @@ Public visitors can submit only through Fastify with validation and a five-per-h
 
 Portfolio visitors can call `POST /v1/demo/session` without registering. Each unguessable session ID owns separate, expiring fictitious state in `demo_sessions`, forces deterministic simulated AI, and never reads or writes persistent Supabase leads. The API returns `401` when a private route has neither an authorized bearer token nor a valid demo-session header. When Supabase is not configured locally, the same adapter safely falls back to in-memory sessions.
 
-## Next integration block
+## Integration status
 
-1. Create the first Supabase Auth administrator and assign `app_metadata.role = portfolio_admin`.
-2. Import the n8n workflows described in `workflows/README.md`.
-3. Add Gmail OAuth, enqueue-on-approval, and provider reconciliation.
-4. Deploy the web and API with separate public and server-only environment variables.
-5. Add end-to-end tests against a disposable Supabase branch and an n8n test instance.
+- Supabase Auth, protected API routes, structured Gemini analysis, and isolated demo sessions are implemented.
+- Gmail OAuth and approval-gated real delivery are implemented. OAuth tokens are encrypted before persistence and are never exposed to the browser.
+- The database outbox claims a draft once. A deterministic RFC 2822 `Message-ID` and the unique draft/idempotency constraints prevent normal repeated approvals from creating duplicate sends.
+- Ambiguous transport/server failures remain in `sending` for reconciliation instead of being retried automatically, because retrying an unknown Gmail outcome could duplicate a message.
+- n8n orchestration and provider reconciliation are the next integration blocks.
 

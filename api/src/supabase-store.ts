@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { analyzeLeadWithGemini, geminiIsConfigured } from "./ai/gemini.js";
 import { DemoStore } from "./store.js";
-import type { LeadStore } from "./store-contract.js";
+import type { DeliveryActor, LeadStore } from "./store-contract.js";
+import { createConfiguredGmailService, GmailDeliveryError, type GmailService } from "./gmail.js";
 import type { Activity, Assessment, Draft, Execution, Lead, LeadInput, Service } from "./types.js";
 
 type Row = Record<string, any>;
@@ -31,7 +32,7 @@ function tone(value: unknown): Activity["tone"] {
 export class SupabaseStore implements LeadStore {
   private readonly client: SupabaseClient;
 
-  constructor(url: string, secretKey: string) {
+  constructor(url: string, secretKey: string, private readonly gmail?: GmailService) {
     this.client = createClient(url, secretKey, {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
       global: { headers: { "X-Client-Info": "leadops-api/0.1" } },
@@ -265,11 +266,11 @@ export class SupabaseStore implements LeadStore {
     return this.get(id);
   }
 
-  async approveAndSend(id: string): Promise<{ lead?: Lead; duplicate: boolean }> {
+  async approveAndSend(id: string, actor?: DeliveryActor): Promise<{ lead?: Lead; duplicate: boolean }> {
     const lead = await this.get(id);
     if (!lead?.draft) return { duplicate: false };
     if (lead.status === "sent") return { lead, duplicate: true };
-    if (lead.status !== "needs_review" && lead.status !== "approved") return { duplicate: false };
+    if (!["needs_review", "approved", "failed"].includes(lead.status)) return { duplicate: false };
     const current = await this.client.from("leads").select("current_draft_id").eq("id", id).single();
     if (current.error) throw databaseError("read current draft", current.error);
     const approval = await this.client.from("approvals").insert({
@@ -277,13 +278,13 @@ export class SupabaseStore implements LeadStore {
       draft_id: current.data.current_draft_id,
       draft_version: lead.draft.version,
       decision: "approved",
-      decided_by_label: "Admin Demo",
+      decided_by: actor?.id ?? null,
+      decided_by_label: actor?.email || "LeadOps administrator",
     }).select("*").single();
     if (approval.error && approval.error.code !== "23505") throw databaseError("record approval", approval.error);
     const approvalRow = approval.data ?? (await this.client.from("approvals").select("*").eq("draft_id", current.data.current_draft_id).eq("decision", "approved").single()).data;
     if (!approvalRow) throw new Error("record approval: approval row unavailable");
     const sendKey = `send:${id}:draft:${lead.draft.version}`;
-    const providerMessageId = `demo_gmail_${randomUUID().slice(0, 8)}`;
     const message = await this.client.from("outbound_messages").insert({
       lead_id: id,
       draft_id: current.data.current_draft_id,
@@ -292,20 +293,77 @@ export class SupabaseStore implements LeadStore {
       recipient_email: lead.email,
       subject: lead.draft.subject,
       body: lead.draft.body,
-      status: "sent",
-      attempt_count: 1,
-      provider_message_id: providerMessageId,
-      sent_at: new Date().toISOString(),
+      status: "pending",
     }).select("*").single();
-    if (message.error && message.error.code !== "23505") throw databaseError("record simulated message", message.error);
-    if (message.error?.code === "23505") return { lead: (await this.get(id))!, duplicate: true };
-    const updated = await this.client.from("leads").update({ status: "sent", sent_at: message.data.sent_at }).eq("id", id);
-    if (updated.error) throw databaseError("finish simulated send", updated.error);
-    await this.client.from("activity_events").insert([
-      { lead_id: id, event_type: "draft.approved", title: "Respuesta aprobada", detail: `Versión ${lead.draft.version} · Admin Demo`, metadata: { tone: "success" } },
-      { lead_id: id, event_type: "email.sent", title: "Envío simulado", detail: `No se envió un correo real · ${providerMessageId}`, metadata: { tone: "success" } },
-    ]);
-    return { lead: await this.get(id), duplicate: false };
+    if (message.error && message.error.code !== "23505") throw databaseError("create email outbox message", message.error);
+    const messageRow = message.data ?? (await this.client.from("outbound_messages").select("*").eq("idempotency_key", sendKey).single()).data;
+    if (!messageRow) throw new Error("create email outbox message: message row unavailable");
+    if (messageRow.status === "sent" || messageRow.status === "sending") return { lead: (await this.get(id))!, duplicate: true };
+
+    if (!approval.error) {
+      await this.client.from("leads").update({ status: "approved" }).eq("id", id);
+      await this.client.from("activity_events").insert({
+        lead_id: id,
+        actor_user_id: actor?.id ?? null,
+        event_type: "draft.approved",
+        title: "Respuesta aprobada",
+        detail: `Versión ${lead.draft.version} · ${actor?.email || "LeadOps administrator"}`,
+        metadata: { tone: "success" },
+      });
+    }
+
+    if (!this.gmail || this.gmail.mode !== "real") {
+      const providerMessageId = `demo_gmail_${randomUUID().slice(0, 8)}`;
+      const sentAt = new Date().toISOString();
+      const simulated = await this.client.from("outbound_messages").update({ status: "sent", attempt_count: Number(messageRow.attempt_count ?? 0) + 1, provider_message_id: providerMessageId, sent_at: sentAt }).eq("id", messageRow.id).in("status", ["pending", "failed"]);
+      if (simulated.error) throw databaseError("finish simulated send", simulated.error);
+      await this.client.from("leads").update({ status: "sent", sent_at: sentAt }).eq("id", id);
+      await this.client.from("activity_events").insert({ lead_id: id, event_type: "email.sent", title: "Envío simulado", detail: `No se envió un correo real · ${providerMessageId}`, metadata: { tone: "success", delivery: "simulated" } });
+      return { lead: await this.get(id), duplicate: false };
+    }
+
+    if (!actor) throw new GmailDeliveryError("GMAIL_ACTOR_REQUIRED", "An authenticated administrator is required for real Gmail delivery.");
+    const claimed = await this.client.from("outbound_messages").update({
+      status: "sending",
+      attempt_count: Number(messageRow.attempt_count ?? 0) + 1,
+      claimed_at: new Date().toISOString(),
+      claimed_by: actor.id,
+      last_error_code: null,
+      last_error_message: null,
+    }).eq("id", messageRow.id).in("status", ["pending", "failed"]).select("*").maybeSingle();
+    if (claimed.error) throw databaseError("claim Gmail message", claimed.error);
+    if (!claimed.data) return { lead: (await this.get(id))!, duplicate: true };
+    await this.client.from("leads").update({ status: "sending" }).eq("id", id);
+    await this.client.from("activity_events").insert({ lead_id: id, actor_user_id: actor.id, event_type: "email.sending", title: "Envío iniciado", detail: "Entrega real mediante Gmail API", metadata: { tone: "neutral", delivery: "real" } });
+
+    try {
+      const provider = await this.gmail.send({
+        ownerUserId: actor.id,
+        to: lead.email,
+        subject: lead.draft.subject,
+        body: lead.draft.body,
+        messageId: `leadops-${createHash("sha256").update(sendKey).digest("hex").slice(0, 32)}@leadops.local`,
+      });
+      const sentAt = new Date().toISOString();
+      const [messageUpdate, leadUpdate, activity] = await Promise.all([
+        this.client.from("outbound_messages").update({ status: "sent", provider_message_id: provider.id, sent_at: sentAt }).eq("id", messageRow.id).eq("status", "sending"),
+        this.client.from("leads").update({ status: "sent", sent_at: sentAt }).eq("id", id),
+        this.client.from("activity_events").insert({ lead_id: id, actor_user_id: actor.id, event_type: "email.sent", title: "Correo enviado", detail: `Gmail · ${provider.id}`, metadata: { tone: "success", delivery: "real", thread_id: provider.threadId } }),
+      ]);
+      if (messageUpdate.error) throw databaseError("record Gmail delivery", messageUpdate.error);
+      if (leadUpdate.error) throw databaseError("finish Gmail delivery", leadUpdate.error);
+      if (activity.error) throw databaseError("record Gmail activity", activity.error);
+      return { lead: await this.get(id), duplicate: false };
+    } catch (error) {
+      const deliveryError = error instanceof GmailDeliveryError ? error : new GmailDeliveryError("GMAIL_DELIVERY_UNKNOWN", error instanceof Error ? error.message : "Unknown Gmail delivery error");
+      const knownFailure = deliveryError.code !== "GMAIL_DELIVERY_UNKNOWN" && !deliveryError.deliveryUnknown;
+      await Promise.all([
+        this.client.from("outbound_messages").update({ status: knownFailure ? "failed" : "sending", last_error_code: deliveryError.code, last_error_message: deliveryError.message }).eq("id", messageRow.id),
+        this.client.from("leads").update({ status: knownFailure ? "failed" : "sending" }).eq("id", id),
+        this.client.from("activity_events").insert({ lead_id: id, actor_user_id: actor.id, event_type: "email.failed", title: knownFailure ? "Falló el envío" : "Entrega por confirmar", detail: `${deliveryError.code} · ${deliveryError.message}`, metadata: { tone: "danger", delivery: "real", retryable: knownFailure && deliveryError.retryable } }),
+      ]);
+      return { lead: await this.get(id), duplicate: false };
+    }
   }
 
   async discard(id: string): Promise<Lead | undefined> {
@@ -322,8 +380,8 @@ export class SupabaseStore implements LeadStore {
   }
 }
 
-export function createConfiguredStore(): LeadStore {
+export function createConfiguredStore(gmail = createConfiguredGmailService()): LeadStore {
   const url = process.env.SUPABASE_URL;
   const secretKey = process.env.SUPABASE_SECRET_KEY;
-  return url && secretKey ? new SupabaseStore(url, secretKey) : new DemoStore();
+  return url && secretKey ? new SupabaseStore(url, secretKey, gmail) : new DemoStore();
 }

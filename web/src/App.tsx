@@ -5,7 +5,7 @@ import {
   MoreHorizontal, Play, RefreshCw, Search, Send, Settings, ShieldCheck, Sparkles,
   TriangleAlert, UserRound, UsersRound, X, XCircle,
 } from "lucide-react";
-import { api, clearApiAccess, useAdminToken, useDemoSession } from "./api";
+import { api, clearApiAccess, useAdminToken, useDemoSession, type GmailStatus } from "./api";
 import { supabase } from "./supabase";
 import type { Lead, LeadStatus } from "./types";
 
@@ -19,11 +19,11 @@ const bilingual = (language: Language, spanish: string, english: string) => lang
 
 const statusLabelsEs: Record<LeadStatus, string> = {
   new: "Nuevo", processing: "Procesando", needs_review: "Por revisar", approved: "Aprobado",
-  sending: "Enviando", sent: "Simulado", failed: "Falló", discarded: "Descartado",
+  sending: "Enviando", sent: "Enviado", failed: "Falló", discarded: "Descartado",
 };
 const statusLabelsEn: Record<LeadStatus, string> = {
   new: "New", processing: "Processing", needs_review: "Needs review", approved: "Approved",
-  sending: "Sending", sent: "Simulated", failed: "Failed", discarded: "Discarded",
+  sending: "Sending", sent: "Sent", failed: "Failed", discarded: "Discarded",
 };
 
 const serviceLabels = { wordpress: "WordPress", woocommerce: "WooCommerce", shopify: "Shopify", other: "Otro" };
@@ -83,7 +83,7 @@ function EmptyDetail() {
   return <div className="empty-detail"><div><Bot size={28} /></div><h3>{bilingual(language, "Selecciona un lead", "Select a lead")}</h3><p>{bilingual(language, "Abre una solicitud para revisar el análisis, editar el borrador y aprobar el envío.", "Open an inquiry to review the analysis, edit the draft, and approve delivery.")}</p></div>;
 }
 
-function LeadDetail({ lead, onClose, onUpdated }: { lead: Lead; onClose: () => void; onUpdated: (lead: Lead) => void }) {
+function LeadDetail({ lead, onClose, onUpdated, mode }: { lead: Lead; onClose: () => void; onUpdated: (lead: Lead) => void; mode: "demo" | "admin" }) {
   const { language } = useLanguage();
   const [subject, setSubject] = useState(lead.draft?.subject ?? "");
   const [body, setBody] = useState(lead.draft?.body ?? "");
@@ -98,6 +98,7 @@ function LeadDetail({ lead, onClose, onUpdated }: { lead: Lead; onClose: () => v
   }
 
   const lastExecution = lead.executions.at(-1);
+  const deliveryFailure = lead.status === "failed" && Boolean(lead.draft && lead.approvedAt);
   return <section className="detail-panel">
     <div className="detail-head">
       <button className="icon-button detail-back" onClick={onClose} aria-label="Cerrar detalle"><ArrowLeft size={20} /></button>
@@ -107,7 +108,7 @@ function LeadDetail({ lead, onClose, onUpdated }: { lead: Lead; onClose: () => v
     <div className="detail-tabs"><button className={tab === "review" ? "active" : ""} onClick={() => setTab("review")}>{bilingual(language, "Revisión", "Review")}</button><button className={tab === "activity" ? "active" : ""} onClick={() => setTab("activity")}>{bilingual(language, "Actividad", "Activity")} <span>{lead.activities.length}</span></button></div>
     <div className="detail-scroll">
       {tab === "review" ? <>
-        {lead.status === "failed" && <div className="error-banner"><TriangleAlert size={19} /><div><strong>{bilingual(language, "El análisis no pudo completarse", "The analysis could not be completed")}</strong><span>{lastExecution?.error || bilingual(language, "Error inesperado", "Unexpected error")}. {bilingual(language, "Puedes reintentar de forma segura.", "You can retry safely.")}</span></div><button className="button secondary compact" disabled={!!busy} onClick={() => action("retry", () => api.processLead(lead.id))}><RefreshCw size={15} />{bilingual(language, "Reintentar", "Retry")}</button></div>}
+        {lead.status === "failed" && <div className="error-banner"><TriangleAlert size={19} /><div><strong>{deliveryFailure ? bilingual(language, "El correo no pudo enviarse", "The email could not be sent") : bilingual(language, "El análisis no pudo completarse", "The analysis could not be completed")}</strong><span>{deliveryFailure ? bilingual(language, "El intento quedó registrado. Puedes reintentar sin crear otro envío en la base de datos.", "The attempt was recorded. You can retry without creating another database delivery.") : `${lastExecution?.error || bilingual(language, "Error inesperado", "Unexpected error")}. ${bilingual(language, "Puedes reintentar de forma segura.", "You can retry safely.")}`}</span></div><button className="button secondary compact" disabled={!!busy} onClick={() => action("retry", () => deliveryFailure ? api.approveLead(lead.id) : api.processLead(lead.id))}><RefreshCw size={15} />{bilingual(language, "Reintentar", "Retry")}</button></div>}
         {lead.status === "processing" && <div className="processing-card"><span className="ai-orb"><Sparkles size={21}/></span><div><strong>{bilingual(language, "Analizando solicitud…", "Analyzing inquiry…")}</strong><p>{bilingual(language, "Extrayendo servicio, prioridad e información faltante.", "Extracting service, priority, and missing information.")}</p></div><span className="loading-dots"><i/><i/><i/></span></div>}
         {lead.assessment && <div className="section-card ai-card">
           <div className="section-title"><span className="section-icon"><Sparkles size={16} /></span><div><h3>{bilingual(language, "Evaluación de IA", "AI assessment")}</h3><p>{Math.round(lead.assessment.confidence * 100)}% {bilingual(language, "de confianza · respuesta estructurada", "confidence · structured response")}</p></div><span className="ai-label">AI</span></div>
@@ -120,7 +121,7 @@ function LeadDetail({ lead, onClose, onUpdated }: { lead: Lead; onClose: () => v
           <label>{bilingual(language, "Asunto", "Subject")}<input value={subject} onChange={(event) => setSubject(event.target.value)} disabled={lead.status !== "needs_review"}/></label>
           <label>{bilingual(language, "Mensaje", "Message")}<textarea rows={9} value={body} onChange={(event) => setBody(event.target.value)} disabled={lead.status !== "needs_review"}/></label>
           {lead.status === "needs_review" && <div className="draft-actions"><button className="button ghost danger" disabled={!!busy} onClick={() => action("discard", () => api.discardLead(lead.id))}><XCircle size={16}/>{bilingual(language, "Descartar", "Discard")}</button><div><button className="button secondary" disabled={!!busy || (subject === lead.draft?.subject && body === lead.draft?.body)} onClick={() => action("save", () => api.updateDraft(lead.id, subject, body))}>{bilingual(language, "Guardar cambios", "Save changes")}</button><button className="button primary" disabled={!!busy} onClick={() => action("approve", async () => { if (subject !== lead.draft?.subject || body !== lead.draft?.body) await api.updateDraft(lead.id, subject, body); return api.approveLead(lead.id); })}><Check size={16}/>{busy === "approve" ? bilingual(language, "Enviando…", "Sending…") : bilingual(language, "Aprobar y enviar", "Approve and send")}</button></div></div>}
-          {lead.status === "sent" && <div className="sent-confirmation"><CheckCircle2 size={20}/><div><strong>{bilingual(language, "Enviado en modo demostración", "Sent in demo mode")}</strong><span>{lead.providerMessageId} · {lead.sentAt && new Date(lead.sentAt).toLocaleString(language === "en" ? "en-US" : "es-GT")}</span></div></div>}
+          {lead.status === "sent" && <div className="sent-confirmation"><CheckCircle2 size={20}/><div><strong>{mode === "demo" || lead.providerMessageId?.startsWith("demo_gmail_") ? bilingual(language, "Enviado en modo demostración", "Sent in demo mode") : bilingual(language, "Enviado mediante Gmail", "Sent through Gmail")}</strong><span>{lead.providerMessageId} · {lead.sentAt && new Date(lead.sentAt).toLocaleString(language === "en" ? "en-US" : "es-GT")}</span></div></div>}
         </div>}
         {lastExecution && <div className="cost-line"><CircleDollarSign size={15}/><span>Costo IA estimado</span><strong>${lastExecution.estimatedCostUsd.toFixed(4)}</strong><i/>
           <span>{(lastExecution.inputTokens + lastExecution.outputTokens).toLocaleString()} tokens</span><i/><span>{(lastExecution.latencyMs / 1000).toFixed(1)} s</span></div>}
@@ -183,7 +184,25 @@ function TeamView({ mode, userEmail }: { mode: "demo" | "admin"; userEmail?: str
 
 function SettingsView({ mode }: { mode: "demo" | "admin" }) {
   const { language, setLanguage } = useLanguage();
-  return <section className="workspace-page"><div className="page-intro"><div><span className="eyebrow">{bilingual(language, "PREFERENCIAS", "PREFERENCES")}</span><h1>{bilingual(language, "Configuración", "Settings")}</h1><p>{bilingual(language, "Personaliza la experiencia y revisa las integraciones.", "Customize the experience and review integrations.")}</p></div></div><div className="settings-layout"><div className="page-card settings-card"><div><h2>{bilingual(language, "Idioma de la interfaz", "Interface language")}</h2><p>{bilingual(language, "Se guarda en este dispositivo. El idioma del correo se elige por cada lead.", "Saved on this device. Email language is selected per lead.")}</p></div><div className="language-picker" role="group" aria-label="Language"><button className={language === "es" ? "active" : ""} onClick={() => setLanguage("es")}><span>ES</span><strong>Español</strong></button><button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}><span>EN</span><strong>English</strong></button></div></div><div className="page-card integrations-card"><h2>{bilingual(language, "Integraciones", "Integrations")}</h2><div><span><Database size={17}/>Supabase</span><em className="connected">{bilingual(language, "Conectado", "Connected")}</em></div><div><span><Sparkles size={17}/>Gemini</span><em className={mode === "demo" ? "simulated" : "connected"}>{mode === "demo" ? bilingual(language, "Simulado", "Simulated") : bilingual(language, "Conectado", "Connected")}</em></div><div><span><Send size={17}/>Gmail</span><em className="simulated">{bilingual(language, "Simulado", "Simulated")}</em></div><div><span><Activity size={17}/>n8n</span><em>{bilingual(language, "Próxima etapa", "Next stage")}</em></div></div></div></section>;
+  const [gmail, setGmail] = useState<GmailStatus>({ mode: "simulated", configured: false, connected: false });
+  const [gmailBusy, setGmailBusy] = useState(false);
+  const [gmailMessage, setGmailMessage] = useState("");
+  useEffect(() => {
+    if (mode === "demo") return;
+    const result = new URLSearchParams(window.location.search).get("gmail");
+    if (result) {
+      setGmailMessage(result === "connected" ? bilingual(language, "Gmail se conectó correctamente.", "Gmail connected successfully.") : bilingual(language, "No se pudo completar la conexión con Gmail.", "The Gmail connection could not be completed."));
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    api.gmailStatus().then(({ data }) => setGmail(data)).catch((error) => setGmailMessage(error instanceof Error ? error.message : "Gmail status unavailable"));
+  }, [mode, language]);
+  async function connectGmail() {
+    setGmailBusy(true); setGmailMessage("");
+    try { const result = await api.connectGmail(); window.location.assign(result.data.authorizationUrl); }
+    catch (error) { setGmailMessage(error instanceof Error ? error.message : "Gmail connection failed"); setGmailBusy(false); }
+  }
+  const gmailLabel = mode === "demo" || gmail.mode === "simulated" ? bilingual(language, "Simulado", "Simulated") : gmail.connected ? gmail.accountEmail || bilingual(language, "Conectado", "Connected") : gmail.configured ? bilingual(language, "Listo para conectar", "Ready to connect") : bilingual(language, "Pendiente de credenciales", "Credentials required");
+  return <section className="workspace-page"><div className="page-intro"><div><span className="eyebrow">{bilingual(language, "PREFERENCIAS", "PREFERENCES")}</span><h1>{bilingual(language, "Configuración", "Settings")}</h1><p>{bilingual(language, "Personaliza la experiencia y revisa las integraciones.", "Customize the experience and review integrations.")}</p></div></div><div className="settings-layout"><div className="page-card settings-card"><div><h2>{bilingual(language, "Idioma de la interfaz", "Interface language")}</h2><p>{bilingual(language, "Se guarda en este dispositivo. El idioma del correo se elige por cada lead.", "Saved on this device. Email language is selected per lead.")}</p></div><div className="language-picker" role="group" aria-label="Language"><button className={language === "es" ? "active" : ""} onClick={() => setLanguage("es")}><span>ES</span><strong>Español</strong></button><button className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}><span>EN</span><strong>English</strong></button></div></div><div className="page-card integrations-card"><h2>{bilingual(language, "Integraciones", "Integrations")}</h2><div><span><Database size={17}/>Supabase</span><em className="connected">{bilingual(language, "Conectado", "Connected")}</em></div><div><span><Sparkles size={17}/>Gemini</span><em className={mode === "demo" ? "simulated" : "connected"}>{mode === "demo" ? bilingual(language, "Simulado", "Simulated") : bilingual(language, "Conectado", "Connected")}</em></div><div className="gmail-integration"><span><Send size={17}/>Gmail<small>{gmailLabel}</small></span>{mode === "admin" && gmail.mode === "real" && gmail.configured ? <button className="button secondary compact" disabled={gmailBusy} onClick={connectGmail}>{gmailBusy ? bilingual(language, "Abriendo…", "Opening…") : gmail.connected ? bilingual(language, "Reconectar", "Reconnect") : bilingual(language, "Conectar", "Connect")}</button> : <em className={mode === "demo" || gmail.mode === "simulated" ? "simulated" : ""}>{gmailLabel}</em>}</div>{gmailMessage && <p className="integration-message">{gmailMessage}</p>}<div><span><Activity size={17}/>n8n</span><em>{bilingual(language, "Próxima etapa", "Next stage")}</em></div></div></div></section>;
 }
 
 function PublicForm({ onCreated, onBack, workspace = false }: { onCreated?: (lead: Lead) => void; onBack: () => void; workspace?: boolean }) {
@@ -330,7 +349,7 @@ function AppContent() {
   else if (view === "executions") page = <ExecutionsView leads={leads}/>;
   else if (view === "team") page = <TeamView mode={access} userEmail={userEmail}/>;
   else if (view === "settings") page = <SettingsView mode={access}/>;
-  else page = <main className={`workspace ${selected ? "detail-open" : ""}`}><InboxView leads={leads} loading={loading} selected={selected} onSelect={(lead) => setSelectedId(lead.id)}/>{selected ? <LeadDetail lead={selected} onClose={() => setSelectedId(undefined)} onUpdated={upsert}/> : <EmptyDetail/>}</main>;
+  else page = <main className={`workspace ${selected ? "detail-open" : ""}`}><InboxView leads={leads} loading={loading} selected={selected} onSelect={(lead) => setSelectedId(lead.id)}/>{selected ? <LeadDetail lead={selected} onClose={() => setSelectedId(undefined)} onUpdated={upsert} mode={access}/> : <EmptyDetail/>}</main>;
   return <div className="app-shell"><Sidebar view={view} onView={setView} open={menuOpen} onClose={() => setMenuOpen(false)} mode={access} userEmail={userEmail} onLogout={logout} reviewCount={reviewCount}/><div className="app-main"><Header onMenu={() => setMenuOpen(true)} onNew={() => setView("form")} mode={access}/>{page}</div></div>;
 }
 
