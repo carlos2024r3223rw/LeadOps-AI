@@ -1,0 +1,79 @@
+{
+  "name": "LeadOps AI — Qualify lead",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "leadops-lead-received",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "b9df81ad-d5a2-4e35-aeb5-c53e0fed345c",
+      "name": "Lead received",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [260, 300],
+      "webhookId": "de9d0ba6-11f8-48c2-90ae-99279da6136a",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "LeadOps Shared Secret"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lead-ops-ai-api.vercel.app/v1/internal/workflows/lead-analysis",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ leadId: $json.body.leadId, idempotencyKey: $json.body.idempotencyKey }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "c515f96e-bd87-4cb3-b6a6-25a2ee6d967d",
+      "name": "Run idempotent analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_AFTER_IMPORT",
+          "name": "LeadOps Shared Secret"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Lead received": {
+      "main": [
+        [
+          {
+            "node": "Run idempotent analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Guatemala"
+  },
+  "versionId": "80d85f04-a225-4444-a4e1-c27575cf6abf",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

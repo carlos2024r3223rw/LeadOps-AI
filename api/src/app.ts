@@ -7,6 +7,7 @@ import type { LeadStore } from "./store-contract.js";
 import { authorizeAdmin } from "./auth.js";
 import { DemoSessions } from "./demo-sessions.js";
 import { createConfiguredGmailService, GmailDeliveryError, type GmailService } from "./gmail.js";
+import { createConfiguredN8nDispatcher, type LeadWorkflowDispatcher } from "./n8n.js";
 
 const leadSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -25,7 +26,16 @@ const draftSchema = z.object({
   body: z.string().trim().min(20).max(10000),
 });
 
-export async function buildApp(store?: LeadStore, gmail: GmailService | undefined = createConfiguredGmailService()) {
+const workflowLeadSchema = z.object({
+  leadId: z.uuid(),
+  idempotencyKey: z.string().trim().min(8).max(240),
+});
+
+export async function buildApp(
+  store?: LeadStore,
+  gmail: GmailService | undefined = createConfiguredGmailService(),
+  n8n: LeadWorkflowDispatcher = createConfiguredN8nDispatcher(),
+) {
   const app = Fastify({ logger: false });
   const configuredStore = store ?? createConfiguredStore(gmail);
   const demoSessions = new DemoSessions();
@@ -53,7 +63,13 @@ export async function buildApp(store?: LeadStore, gmail: GmailService | undefine
   app.get("/health", async () => {
     const geminiEnabled = Boolean(process.env.GEMINI_API_KEY) && process.env.DEMO_MODE?.toLowerCase() !== "true";
     const persistentStorage = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY);
-    return { status: "ok", mode: geminiEnabled ? "gemini" : "demo", storage: persistentStorage ? "supabase" : "memory", delivery: gmail?.mode === "real" && gmail.configured ? "gmail" : "simulated" };
+    return {
+      status: "ok",
+      mode: geminiEnabled ? "gemini" : "demo",
+      storage: persistentStorage ? "supabase" : "memory",
+      delivery: gmail?.mode === "real" && gmail.configured ? "gmail" : "simulated",
+      orchestration: n8n.configured ? "n8n" : "inline",
+    };
   });
   app.post("/v1/demo/session", async () => {
     const session = await demoSessions.create();
@@ -79,8 +95,48 @@ export async function buildApp(store?: LeadStore, gmail: GmailService | undefine
     const parsed = leadSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "Invalid lead", issues: parsed.error.issues });
     const result = await configuredStore.create(parsed.data);
-    const lead = result.duplicate ? result.lead : (await configuredStore.process(result.lead.id) ?? result.lead);
-    return reply.code(result.duplicate ? 200 : 201).send({ data: lead, duplicate: result.duplicate });
+    const workflowKey = `lead-analysis:${result.lead.id}:${parsed.data.idempotencyKey.trim().toLowerCase()}`;
+    if (result.duplicate) {
+      if (n8n.configured && ["processing", "failed"].includes(result.lead.status)) {
+        try {
+          await n8n.dispatchLeadCreated({ leadId: result.lead.id, idempotencyKey: workflowKey });
+          return reply.code(200).send({ data: result.lead, duplicate: true, orchestration: "n8n_retry" });
+        } catch (error) {
+          if (n8n.required) {
+            const message = error instanceof Error ? error.message : "N8N_DISPATCH_FAILED";
+            return reply.code(502).send({ error: "Workflow dispatch failed", code: message, data: result.lead, duplicate: true });
+          }
+        }
+      }
+      return reply.code(200).send({ data: result.lead, duplicate: true, orchestration: "duplicate" });
+    }
+
+    if (n8n.configured) {
+      try {
+        await n8n.dispatchLeadCreated({ leadId: result.lead.id, idempotencyKey: workflowKey });
+        return reply.code(201).send({ data: result.lead, duplicate: false, orchestration: "n8n" });
+      } catch (error) {
+        if (n8n.required) {
+          const message = error instanceof Error ? error.message : "N8N_DISPATCH_FAILED";
+          return reply.code(502).send({ error: "Workflow dispatch failed", code: message, data: result.lead });
+        }
+      }
+    }
+
+    const lead = await configuredStore.process(result.lead.id, workflowKey) ?? result.lead;
+    return reply.code(201).send({ data: lead, duplicate: false, orchestration: n8n.configured ? "inline_fallback" : "inline" });
+  });
+
+  app.post("/v1/internal/workflows/lead-analysis", async (request, reply) => {
+    const secretHeader = request.headers["x-leadops-workflow-secret"];
+    const secret = Array.isArray(secretHeader) ? secretHeader[0] : secretHeader;
+    if (!n8n.configured || !n8n.authorizeInternalRequest(secret)) {
+      return reply.code(401).send({ error: "Invalid workflow credentials" });
+    }
+    const parsed = workflowLeadSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Invalid workflow event", issues: parsed.error.issues });
+    const lead = await configuredStore.process(parsed.data.leadId, parsed.data.idempotencyKey);
+    return lead ? { data: lead } : reply.code(404).send({ error: "Lead not found" });
   });
   app.post("/v1/leads", async (request, reply) => {
     const context = await protectedContext(request, reply);

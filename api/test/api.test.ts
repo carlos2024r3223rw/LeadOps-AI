@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { buildApp } from "../src/app.js";
 import { DemoStore } from "../src/store.js";
 import { createRawMessage } from "../src/gmail.js";
+import { N8nDispatcher } from "../src/n8n.js";
 
 const validLead = {
   name: "Carlos Méndez",
@@ -24,7 +25,7 @@ test("health confirms safe demo delivery", async () => {
   const app = await buildApp(new DemoStore());
   const response = await app.inject({ method: "GET", url: "/health" });
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.json(), { status: "ok", mode: "demo", storage: "memory", delivery: "simulated" });
+  assert.deepEqual(response.json(), { status: "ok", mode: "demo", storage: "memory", delivery: "simulated", orchestration: "inline" });
   await app.close();
 });
 
@@ -37,6 +38,93 @@ test("repeated intake returns the same lead", async () => {
   assert.equal(first.json().data.id, second.json().data.id);
   assert.equal(second.json().duplicate, true);
   await app.close();
+});
+
+test("n8n dispatch and callback are authenticated and idempotent", async () => {
+  const workflowSecret = "workflow-test-secret-at-least-32-chars";
+  const dispatched: Array<{ leadId: string; idempotencyKey: string }> = [];
+  const dispatcher = {
+    configured: true,
+    required: false,
+    async dispatchLeadCreated(event: { leadId: string; idempotencyKey: string }) {
+      dispatched.push(event);
+    },
+    authorizeInternalRequest(secret: string | undefined) {
+      return secret === workflowSecret;
+    },
+  };
+  const app = await buildApp(new DemoStore(), undefined, dispatcher);
+  const created = await app.inject({
+    method: "POST",
+    url: "/v1/public/leads",
+    payload: { ...validLead, idempotencyKey: "n8n-dispatch-001" },
+  });
+  const leadId = created.json().data.id as string;
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.json().orchestration, "n8n");
+  assert.equal(dispatched.length, 1);
+
+  const duplicateIntake = await app.inject({
+    method: "POST",
+    url: "/v1/public/leads",
+    payload: { ...validLead, idempotencyKey: "n8n-dispatch-001" },
+  });
+  assert.equal(duplicateIntake.statusCode, 200);
+  assert.equal(duplicateIntake.json().orchestration, "n8n_retry");
+  assert.equal(dispatched.length, 2);
+  assert.equal(dispatched[0]!.idempotencyKey, dispatched[1]!.idempotencyKey);
+
+  const unauthorized = await app.inject({
+    method: "POST",
+    url: "/v1/internal/workflows/lead-analysis",
+    payload: dispatched[0],
+  });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const processed = await app.inject({
+    method: "POST",
+    url: "/v1/internal/workflows/lead-analysis",
+    headers: { "x-leadops-workflow-secret": workflowSecret },
+    payload: dispatched[0],
+  });
+  assert.equal(processed.statusCode, 200);
+  assert.equal(processed.json().data.status, "needs_review");
+
+  const repeated = await app.inject({
+    method: "POST",
+    url: "/v1/internal/workflows/lead-analysis",
+    headers: { "x-leadops-workflow-secret": workflowSecret },
+    payload: dispatched[0],
+  });
+  assert.equal(repeated.statusCode, 200);
+  assert.equal(repeated.json().data.executions.length, 1);
+  await app.close();
+});
+
+test("n8n dispatcher sends a minimal authenticated event", async () => {
+  const secret = "s".repeat(32);
+  let capturedUrl = "";
+  let capturedInit: RequestInit | undefined;
+  const dispatcher = new N8nDispatcher(
+    "https://n8n.example.test/webhook/leadops-lead-received",
+    secret,
+    false,
+    (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url);
+      capturedInit = init;
+      return new Response(null, { status: 202 });
+    }) as typeof fetch,
+  );
+
+  await dispatcher.dispatchLeadCreated({ leadId: "00000000-0000-4000-8000-000000000001", idempotencyKey: "lead-analysis:test-key" });
+  assert.equal(dispatcher.configured, true);
+  assert.equal(dispatcher.authorizeInternalRequest(secret), true);
+  assert.equal(dispatcher.authorizeInternalRequest(`${secret}x`), false);
+  assert.equal(capturedUrl, "https://n8n.example.test/webhook/leadops-lead-received");
+  assert.equal((capturedInit?.headers as Record<string, string>)["X-LeadOps-Workflow-Secret"], secret);
+  const payload = JSON.parse(String(capturedInit?.body));
+  assert.deepEqual(Object.keys(payload).sort(), ["event", "idempotencyKey", "leadId", "occurredAt", "version"]);
+  assert.equal(payload.event, "lead.received");
 });
 
 test("analysis, approval and sending are idempotent", async () => {

@@ -11,7 +11,7 @@ export interface LeadStore {
   list(): Awaitable<Lead[]>;
   get(id: string): Awaitable<Lead | undefined>;
   create(input: LeadInput): Awaitable<{ lead: Lead; duplicate: boolean }>;
-  process(id: string): Promise<Lead | undefined>;
+  process(id: string, idempotencyKey?: string): Promise<Lead | undefined>;
   updateDraft(id: string, subject: string, body: string): Awaitable<Lead | undefined>;
   approveAndSend(id: string, actor?: DeliveryActor): Awaitable<{ lead?: Lead; duplicate: boolean }>;
   discard(id: string): Awaitable<Lead | undefined>;

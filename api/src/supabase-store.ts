@@ -178,12 +178,12 @@ export class SupabaseStore implements LeadStore {
     return { lead: (await this.get(row.id))!, duplicate: false };
   }
 
-  async process(id: string): Promise<Lead | undefined> {
+  async process(id: string, idempotencyKey?: string): Promise<Lead | undefined> {
     const lead = await this.get(id);
     if (!lead) return undefined;
     if (lead.status === "needs_review" || lead.status === "sent" || lead.status === "discarded") return lead;
     const attempt = lead.executions.length + 1;
-    const executionKey = `lead-analysis:${id}:attempt:${attempt}`;
+    const executionKey = idempotencyKey?.trim() || `lead-analysis:${id}:attempt:${attempt}`;
     const executionResult = await this.client.from("workflow_executions").insert({
       lead_id: id,
       workflow_name: "lead-ai-analysis",
