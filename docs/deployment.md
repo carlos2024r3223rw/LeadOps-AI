@@ -78,3 +78,28 @@ Detailed Google Cloud and OAuth setup is in [`gmail-oauth.md`](gmail-oauth.md).
 ## 6. Optional Supabase health signal
 
 Add GitHub repository secrets `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`. The scheduled workflow calls only `keepalive_ping()` approximately every three days. It is a health signal, not a guarantee that a Free project will never pause.
+
+## 7. n8n on Render
+
+The repository includes `render.yaml` and a pinned n8n Docker image in `infra/n8n/Dockerfile`.
+
+The free Render service is suitable for the portfolio demo but sleeps after inactivity. Lead intake remains safe while it wakes because the API falls back to its idempotent inline processor unless `N8N_REQUIRED=true` is deliberately enabled.
+
+n8n stores its internal state in the existing Supabase PostgreSQL instance under a dedicated, non-exposed `n8n` schema and a dedicated login role. Do not use the `public` schema and do not reuse the Supabase `postgres` password.
+
+During Blueprint creation, Render asks for three secret values:
+
+- `DB_POSTGRESDB_HOST`: the Supabase **Session pooler** host.
+- `DB_POSTGRESDB_USER`: the dedicated role followed by the project reference for pooled access.
+- `DB_POSTGRESDB_PASSWORD`: the dedicated role password.
+
+Render generates `N8N_ENCRYPTION_KEY` once and keeps it outside Git. Losing or rotating this value without a credential migration makes stored n8n credentials unreadable.
+
+After the first deployment:
+
+1. Create the n8n owner account from the Render URL.
+2. Import `workflows/01-qualify-lead.json`.
+3. Create and assign the `LeadOps Shared Secret` Header Auth credential.
+4. Activate the workflow.
+5. Add its production webhook URL and the same shared secret to the Vercel API project.
+6. Keep `N8N_REQUIRED=false` on the free Render plan so cold starts cannot block intake.

@@ -14,6 +14,8 @@ Nodes: protected webhook → authenticated internal API callback. The API atomic
 
 ### Import and configure
 
+The self-hosted Render deployment is defined in the repository root `render.yaml`; production setup details are in `docs/deployment.md`.
+
 1. Import `01-qualify-lead.json` into n8n.
 2. Create an **Header Auth** credential named `LeadOps Shared Secret`:
    - Name: `X-LeadOps-Workflow-Secret`

@@ -1,0 +1,78 @@
+services:
+  - type: web
+    name: leadops-n8n
+    runtime: docker
+    plan: free
+    region: virginia
+    branch: main
+    dockerfilePath: ./infra/n8n/Dockerfile
+    dockerContext: .
+    dockerCommand: >-
+      sh -c 'export N8N_WEBHOOK_URL="https://${RENDER_EXTERNAL_HOSTNAME}/";
+      export N8N_EDITOR_BASE_URL="${N8N_WEBHOOK_URL}";
+      exec n8n'
+    healthCheckPath: /healthz
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: N8N_PORT
+        value: 10000
+      - key: N8N_PROTOCOL
+        value: https
+      - key: N8N_PROXY_HOPS
+        value: 1
+      - key: NODE_ENV
+        value: production
+      - key: GENERIC_TIMEZONE
+        value: America/Guatemala
+      - key: TZ
+        value: America/Guatemala
+      - key: N8N_ENCRYPTION_KEY
+        generateValue: true
+      - key: N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS
+        value: true
+      - key: N8N_SECURE_COOKIE
+        value: true
+      - key: N8N_BLOCK_ENV_ACCESS_IN_NODE
+        value: true
+      - key: N8N_TEMPLATES_ENABLED
+        value: false
+      - key: N8N_DIAGNOSTICS_ENABLED
+        value: false
+      - key: N8N_PERSONALIZATION_ENABLED
+        value: false
+      - key: EXECUTIONS_MODE
+        value: regular
+      - key: EXECUTIONS_TIMEOUT
+        value: 300
+      - key: EXECUTIONS_DATA_SAVE_ON_ERROR
+        value: all
+      - key: EXECUTIONS_DATA_SAVE_ON_SUCCESS
+        value: all
+      - key: EXECUTIONS_DATA_PRUNE
+        value: true
+      - key: EXECUTIONS_DATA_MAX_AGE
+        value: 168
+      - key: EXECUTIONS_DATA_PRUNE_MAX_COUNT
+        value: 1000
+      - key: DB_TYPE
+        value: postgresdb
+      - key: DB_POSTGRESDB_DATABASE
+        value: postgres
+      - key: DB_POSTGRESDB_PORT
+        value: 5432
+      - key: DB_POSTGRESDB_SCHEMA
+        value: n8n
+      - key: DB_POSTGRESDB_POOL_SIZE
+        value: 2
+      - key: DB_POSTGRESDB_SSL_ENABLED
+        value: true
+      - key: DB_POSTGRESDB_SSL_REJECT_UNAUTHORIZED
+        value: false
+      - key: DB_POSTGRESDB_HOST
+        sync: false
+      - key: DB_POSTGRESDB_USER
+        sync: false
+      - key: DB_POSTGRESDB_PASSWORD
+        sync: false
+
