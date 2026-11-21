@@ -28,6 +28,7 @@ end
 $$;
 
 grant connect on database postgres to leadops_n8n;
+grant create on database postgres to leadops_n8n;
 
 create schema if not exists n8n;
 revoke all on schema n8n from public;
