@@ -24,6 +24,12 @@ export interface GmailSendResult {
   threadId?: string;
 }
 
+const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+
+function hasGmailSendScope(scopes: unknown) {
+  return Array.isArray(scopes) && scopes.includes(GMAIL_SEND_SCOPE);
+}
+
 export class GmailDeliveryError extends Error {
   constructor(public readonly code: string, message: string, public readonly retryable = false, public readonly deliveryUnknown = false) {
     super(message);
@@ -124,9 +130,9 @@ export class GmailService {
   async status(ownerUserId: string): Promise<GmailStatus> {
     const base: GmailStatus = { mode: this.mode, configured: this.configured, connected: false };
     if (!this.configured) return base;
-    const result = await this.client.from("gmail_integrations").select("account_email, connected_at, revoked_at, encrypted_refresh_token").eq("owner_user_id", ownerUserId).maybeSingle();
+    const result = await this.client.from("gmail_integrations").select("account_email, connected_at, revoked_at, encrypted_refresh_token, scopes").eq("owner_user_id", ownerUserId).maybeSingle();
     if (result.error) throw new GmailDeliveryError("GMAIL_STATUS_FAILED", result.error.message);
-    if (!result.data || result.data.revoked_at || !result.data.encrypted_refresh_token) return base;
+    if (!result.data || result.data.revoked_at || !result.data.encrypted_refresh_token || !hasGmailSendScope(result.data.scopes)) return base;
     return { ...base, connected: true, accountEmail: result.data.account_email, connectedAt: result.data.connected_at };
   }
 
@@ -146,10 +152,9 @@ export class GmailService {
     url.searchParams.set("client_id", this.clientId!);
     url.searchParams.set("redirect_uri", this.redirectUri!);
     url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", "openid email https://www.googleapis.com/auth/gmail.send");
+    url.searchParams.set("scope", `openid email ${GMAIL_SEND_SCOPE}`);
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("prompt", "consent");
-    url.searchParams.set("include_granted_scopes", "true");
     url.searchParams.set("state", state);
     return url.toString();
   }
@@ -170,6 +175,10 @@ export class GmailService {
     });
     const tokens = await response.json() as Row;
     if (!response.ok || !tokens.access_token) throw new GmailDeliveryError("GMAIL_TOKEN_EXCHANGE_FAILED", safeErrorMessage(tokens, "Google rejected the authorization code."));
+    const grantedScopes = String(tokens.scope ?? "").split(" ").filter(Boolean);
+    if (!hasGmailSendScope(grantedScopes)) {
+      throw new GmailDeliveryError("GMAIL_SCOPE_MISSING", "Google did not grant permission to send email. Reconnect Gmail and enable the send permission.");
+    }
 
     const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { Authorization: `Bearer ${tokens.access_token}` } });
     const profile = await profileResponse.json() as Row;
@@ -182,7 +191,7 @@ export class GmailService {
       encrypted_access_token: encryptToken(tokens.access_token, this.encryptionKey),
       encrypted_refresh_token: refreshToken,
       access_token_expires_at: new Date(Date.now() + Number(tokens.expires_in ?? 3600) * 1000).toISOString(),
-      scopes: String(tokens.scope ?? "").split(" ").filter(Boolean),
+      scopes: grantedScopes,
       connected_at: new Date().toISOString(),
       revoked_at: null,
       pending_state_hash: null,
@@ -230,6 +239,7 @@ export class GmailService {
     if (integration.error) throw new GmailDeliveryError("GMAIL_CONNECTION_READ_FAILED", integration.error.message);
     const row = integration.data as Row | null;
     if (!row?.encrypted_refresh_token || !row.account_email) throw new GmailDeliveryError("GMAIL_NOT_CONNECTED", "Connect a Gmail account before sending real email.");
+    if (!hasGmailSendScope(row.scopes)) throw new GmailDeliveryError("GMAIL_SCOPE_MISSING", "Reconnect Gmail and grant permission to send email.");
     const accessToken = await this.accessToken(row);
     const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
       method: "POST",
