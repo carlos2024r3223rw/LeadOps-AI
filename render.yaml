@@ -25,12 +25,14 @@ services:
         value: 1
       - key: NODE_ENV
         value: production
-      # Render Free provides 512 MB. Keep V8 below the container limit and
-      # disable task runners because this workflow only uses core HTTP nodes.
+      # Render Free provides 512 MB. Keep V8 below the container limit. This
+      # workflow only uses core HTTP nodes, so no task-runner process is needed.
       - key: NODE_OPTIONS
-        value: --max-old-space-size=384
-      - key: N8N_RUNNERS_ENABLED
-        value: false
+        value: --max-old-space-size=320
+      - key: N8N_RUNNERS_MODE
+        value: external
+      - key: N8N_RUNNERS_AUTH_TOKEN
+        generateValue: true
       - key: GENERIC_TIMEZONE
         value: America/Guatemala
       - key: TZ
