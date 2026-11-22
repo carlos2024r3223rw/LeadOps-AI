@@ -8,7 +8,7 @@ LeadOps AI is a portfolio-ready, human-in-the-loop lead operations platform for 
 - Private-style operations dashboard with pipeline metrics and filters.
 - Deterministic development AI that classifies leads and drafts a reply.
 - Optional Gemini integration with strict JSON Schema, token accounting, bounded output, and safe retries.
-- Editable review panel, approval, discard, simulated sending, errors, and retries.
+- Editable review panel, approval, discard, approval-gated Gmail delivery, errors, and retries.
 - Activity timeline with attempts, token counts, and estimated AI cost.
 - Idempotent API operations that prevent duplicate leads and duplicate sends.
 - Installable PWA manifest and offline application shell.
@@ -17,8 +17,9 @@ LeadOps AI is a portfolio-ready, human-in-the-loop lead operations platform for 
 - Private dashboard access with Supabase email/password authentication and server-side role authorization.
 - Registration-free demo sessions with isolated fictitious data and simulated AI/email actions.
 - Public intake separated from dashboard APIs and limited to five submissions per IP per hour.
+- Production n8n orchestration on Render with authenticated callbacks, inline fallback, and end-to-end idempotency.
 
-Without `SUPABASE_SECRET_KEY`, the API safely falls back to in-memory data. With `SUPABASE_URL` and `SUPABASE_SECRET_KEY`, the same workflow persists in Supabase. Email delivery remains simulated in both modes.
+Without `SUPABASE_SECRET_KEY`, the API safely falls back to in-memory data. With `SUPABASE_URL` and `SUPABASE_SECRET_KEY`, the same workflow persists in Supabase. Real Gmail delivery is opt-in and approval-gated; isolated demo sessions always simulate delivery.
 
 When `DEMO_MODE=false` and `GEMINI_API_KEY` is configured on the API server, lead analysis uses `gemini-3.1-flash-lite`. The key must never be placed in the browser or committed to Git.
 
@@ -75,6 +76,8 @@ The workflow runs approximately every three calendar days at 09:15 Guatemala tim
 Copy `.env.example` to `.env` when connecting services. Never expose the Supabase secret key, Gmail refresh token, n8n secret, or AI key through `VITE_*` variables. The Supabase secret key belongs only in the API environment and bypasses RLS; it must never be shipped to the browser or committed to Git. In production, the browser talks only to Fastify; Fastify validates the user session and performs privileged operations server-side.
 
 The API supports controlled Gmail delivery through server-side OAuth. Real delivery remains opt-in (`GMAIL_DELIVERY_MODE=real`), requires an authenticated administrator, and can only run after an immutable approval and idempotent outbox record exist. Demo sessions always simulate email. See `docs/gmail-oauth.md` for activation.
+
+The production portfolio deployment uses Vercel for the web and Fastify API, Render for n8n, and Supabase for PostgreSQL and Auth. The published n8n workflow receives only a lead ID plus an idempotency key, then calls the protected API workflow endpoint with a shared secret; lead PII is loaded and processed server-side.
 
 The portfolio demo stores only fictitious, expiring session state in `demo_sessions`. This keeps the demo reliable when the API runs across multiple serverless instances while preserving separation from real leads.
 

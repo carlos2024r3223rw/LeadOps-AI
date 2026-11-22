@@ -46,5 +46,5 @@ Portfolio visitors can call `POST /v1/demo/session` without registering. Each un
 - Gmail OAuth and approval-gated real delivery are implemented. OAuth tokens are encrypted before persistence and are never exposed to the browser.
 - The database outbox claims a draft once. A deterministic RFC 2822 `Message-ID` and the unique draft/idempotency constraints prevent normal repeated approvals from creating duplicate sends.
 - Ambiguous transport/server failures remain in `sending` for reconciliation instead of being retried automatically, because retrying an unknown Gmail outcome could duplicate a message.
-- n8n lead-analysis orchestration is implemented with shared-secret authentication, inline fallback, and callback idempotency. Provider reconciliation is the next integration block.
+- n8n lead-analysis orchestration is deployed with shared-secret authentication, inline fallback, and callback idempotency. A repeated intake or webhook callback reuses the same database execution instead of creating another AI result.
 
