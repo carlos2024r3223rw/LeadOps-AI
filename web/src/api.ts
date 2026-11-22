@@ -8,6 +8,14 @@ export interface GmailStatus {
   connectedAt?: string;
 }
 
+export interface SystemHealth {
+  status: "ok";
+  mode: "gemini" | "demo";
+  storage: "supabase" | "memory";
+  delivery: "gmail" | "simulated";
+  orchestration: "n8n" | "inline";
+}
+
 const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "" : "http://localhost:3001");
 let accessToken: string | undefined;
 let demoSessionId: string | undefined;
@@ -50,6 +58,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  health: () => request<SystemHealth>("/health"),
   startDemo: () => request<{ data: { sessionId: string; expiresAt: string; mode: "isolated_demo" } }>("/v1/demo/session", { method: "POST" }),
   currentAccess: () => request<{ data: { mode: "admin" | "demo"; role: string; email?: string } }>("/v1/auth/me"),
   listLeads: () => request<{ data: Lead[] }>("/v1/leads"),

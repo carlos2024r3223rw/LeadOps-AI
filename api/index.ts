@@ -10,6 +10,7 @@ function healthPayload() {
     mode: process.env.GEMINI_API_KEY && process.env.DEMO_MODE?.toLowerCase() !== "true" ? "gemini" : "demo",
     storage: process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY ? "supabase" : "memory",
     delivery: gmailConfigured ? "gmail" : "simulated",
+    orchestration: process.env.N8N_WEBHOOK_URL && (process.env.N8N_SHARED_SECRET?.length ?? 0) >= 32 ? "n8n" : "inline",
   };
 }
 
